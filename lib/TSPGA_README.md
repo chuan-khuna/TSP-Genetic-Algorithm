@@ -9,7 +9,8 @@ genetic algorithm TSP
 - selection (เลือก parent ที่จะไปรุ่นต่อไป)
   - ตัวที่ดีสุดจะได้ไปต่อแน่ๆ 1 ตัว
   - tournament selection
-    > สุ่มมาหลายๆตัว เลือกตัวเก่งสุดใน tournament
+    > สุ่มมาหลายๆตัว เลือกตัวเก่งสุดใน tournament **(ไม่ได้ตามหลัก algorithm จริงๆ)**
+    
 - offspring (สร้างตัวใหม่ๆ จาก parent)
 
 ## **init**
