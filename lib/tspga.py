@@ -41,6 +41,8 @@ class TSPGA:
                 self.selection()
                 self.create_offspring()
             
+            # assign last generation fitness
+            self.assign_fitness()
             df = pd.DataFrame(self.pop)
             df.to_csv(f'{output_path}/_gen_last.csv', index=False)
 
@@ -50,6 +52,8 @@ class TSPGA:
                 self.assign_fitness()
                 self.selection()
                 self.create_offspring()
+            # assign last generation fitness
+            self.assign_fitness()
 
     def init_pop(self):
         population = []
