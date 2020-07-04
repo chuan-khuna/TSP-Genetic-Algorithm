@@ -1,140 +1,147 @@
-
 import numpy as np
 import pandas as pd
-
 from .city import *
-from .visualize import *
 
-class TSPGA:
-    def __init__(self, city_df, distance_df, pop_size=5, max_generation=10, nextgen_num_parent=2, tournament_size=5, mutation_prob=0.5, mutation_lim=2):
 
-        # data frame
-        self.city_df = city_df
-        self.distance_df = distance_df
+class GAtsp:
 
-        # ga setting
-        self.pop_size = pop_size
-        self.gene_size = self.city_df.shape[0]
-        self.max_generation = max_generation
-
-        # next gen setting
-        # number of parent to nextgen
-        self.nextgen_num_parent = nextgen_num_parent
-        self.tournament_size =tournament_size
+    def __init__(self, population_size=10, best_parent=2, nextgen_parent=5, mutation_prob=0.5, tournament_size=5):
+        self.population_size = population_size
+        self.best_parent = best_parent
+        self.nextgen_parent = nextgen_parent
         self.mutation_prob = mutation_prob
-        self.mutation_lim = mutation_lim
+        self.tournament_size = tournament_size
 
-        self.pop = self.init_pop()
+        self.print_log_step = 25
 
-    def run_ga(self, log=False, output_path='./ga_log/'):
+    def fit(self, city_df, distance_df):
+        self.cities = city_df
+        self.distances = distance_df
 
-        if log:
-            df = pd.DataFrame(self.pop)
-            df.to_csv(f'{output_path}/_gen_init.csv', index=False)
-            
-            for generation in range(1, self.max_generation+1):
-                self.assign_fitness()
-                print(f"{generation=}")
-                df = pd.DataFrame(self.pop)
-                df.to_csv(f'{output_path}/gen_{generation}.csv', index=False)
+        # gene
+        self.gene_length = len(self.cities)
+        # city_id arr
+        self.gene_arr = np.arange(self.gene_length)
 
-                self.selection()
-                self.create_offspring()
-            
-            # assign last generation fitness
-            self.assign_fitness()
-            df = pd.DataFrame(self.pop)
-            df.to_csv(f'{output_path}/_gen_last.csv', index=False)
+    def run_ga(self, max_generation=100):
+        self.population = self._init_population()
+        self.fitness = self.compute_fitness()
+        print("> generation: init")
+        print("> fittest:", round(self.fitness[0], 4), round(1 / self.fitness[0], 2))
+        for gen in range(1, max_generation + 1):
+            self.fitness = self.compute_fitness()
+            self.selection()
+            self.breeding()
+            self.population = self.nextgen
+            if gen % self.print_log_step == 0 or gen == 1:
+                print("generation:", gen)
+                self.fitness = self.compute_fitness()
+                print("fittest:", round(self.fitness[0], 4), round(1 / self.fitness[0], 2))
+        self.fitness = self.compute_fitness()
+        print("> generation: last")
+        print("> fittest:", round(self.fitness[0], 4), round(1 / self.fitness[0], 2))
 
-        else:
-            for generation in range(1, self.max_generation+1):
-                print(f"{generation=}")
-                self.assign_fitness()
-                self.selection()
-                self.create_offspring()
-            # assign last generation fitness
-            self.assign_fitness()
+    def run_ga_save_log(self, max_generation=100, log_path="./ga_log/"):
+        self.population = self._init_population()
+        self.fitness = self.compute_fitness()
+        print("> generation: init")
+        print("> fittest:", round(self.fitness[0], 4), round(1 / self.fitness[0], 2))
+        df = pd.DataFrame(self.population)
+        df.to_csv(f"{log_path}/_ga_log_start.csv", index=False)
+        for gen in range(1, max_generation + 1):
+            self.fitness = self.compute_fitness()
+            self.selection()
+            self.breeding()
+            self.population = self.nextgen
+            df = pd.DataFrame(self.population)
+            df.to_csv(f"{log_path}/ga_log_{gen}.csv", index=False)
+            if gen % self.print_log_step == 0 or gen == 1:
+                print("generation:", gen)
+                self.fitness = self.compute_fitness()
+                print("fittest:", round(self.fitness[0], 4), round(1 / self.fitness[0], 2))
+        self.fitness = self.compute_fitness()
+        print("> generation: last")
+        print("> fittest:", round(self.fitness[0], 4), round(1 / self.fitness[0], 2))
+        df = pd.DataFrame(self.population)
+        df.to_csv(f"{log_path}/_ga_log_final.csv", index=False)
 
-    def init_pop(self):
-        population = []
-        route = np.arange(0, self.gene_size)
-        for i in range(self.pop_size):
-            population.append(np.random.choice(route, len(route), replace=False))
-        return np.array(population)
-
-
-    def assign_fitness(self):
-        self.pop_distance = self._cal_population_distance()
-        self.pop_fitness = 1/self.pop_distance
-
+    def compute_fitness(self):
+        population_distance = self._compute_distance()
+        fitness = 1 / population_distance
+        return np.array(fitness)
 
     def selection(self):
-        self.next_gen = np.zeros_like(self.pop)
-        
-        # send fittest parent to next gen
-        self.next_gen[0] = self.pop[np.argmax(self.pop_fitness)]
+        self.nextgen = np.zeros_like(self.population)
 
-        for i in range(1, self.nextgen_num_parent):
-            self.next_gen[i] = self._tournament_selection(self.tournament_size)
+        # fitness index (sort fitness by descending)
+        fitness_sort_ind = np.argsort(self.fitness)[::-1]
 
+        # select best n parent to next generation
+        for i in range(self.best_parent):
+            self.nextgen[i] = self.population[fitness_sort_ind[i]]
 
-    def create_offspring(self):
-        parent_ind = np.arange(0, self.nextgen_num_parent)
-        gene_ind = np.arange(0, self.gene_size)
+        # select parent to next generation by tournament selection
+        for i in range(self.best_parent, self.nextgen_parent):
+            tour_winner = self._tournament_selection()
+            self.nextgen[i] = tour_winner
 
-        # cross over
-        for i in range(self.nextgen_num_parent, self.pop_size):
-            selected_parent =  np.random.choice(parent_ind, 2, replace=False)
-            cross_over_loc = np.sort(np.random.choice(gene_ind, 2, replace=False))
-            self.next_gen[i] = self._cross_over(self.next_gen[selected_parent[0]], self.next_gen[selected_parent[1]], cross_over_loc[0], cross_over_loc[1])
-        
-        # mutation
-        for i in range(self.nextgen_num_parent, self.pop_size):
-            # gaurantee mutation
-            mutation_loc = np.sort(np.random.choice(gene_ind, 2, replace=False))
-            self.next_gen[i] = self._mutation(self.next_gen[i], mutation_loc[0], mutation_loc[1])
+    def breeding(self):
+        parent_pool = self.nextgen[:self.nextgen_parent]
+        parent_id = np.arange(self.nextgen_parent)
 
-            # mutation again
-            for m in range(self.mutation_lim):
-                if np.random.rand() < self.mutation_prob:
-                    mutation_loc = np.sort(np.random.choice(gene_ind, 2, replace=False))
-                    self.next_gen[i] = self._mutation(self.next_gen[i], mutation_loc[0], mutation_loc[1])
-                else:
-                    self.next_gen[i] = self.next_gen[i]
-                    break
+        # crossover
+        for i in range(self.nextgen_parent, self.population_size, 2):
+            parent1, parent2 = parent_pool[np.random.choice(parent_id, 2, replace=False)]
+            start, end = np.sort(np.random.choice(self.gene_arr, 2, replace=False))
+            offspring1, offspring2 = self.crossover(parent1, parent2, start, end)
+            self.nextgen[i] = offspring1
+            if i + 1 < self.population_size:
+                self.nextgen[i + 1] = offspring2
+        for i in range(self.nextgen_parent, self.population_size):
+            loc1, loc2 = np.sort(np.random.choice(self.gene_arr, 2, replace=False))
+            self.nextgen[i] = self.mutation(self.nextgen[i], loc1, loc2)
 
-        self.pop = self.next_gen
+    def mutation(self, inv, loc1, loc2):
+        inv_copy = inv.copy()
+        if np.random.rand() <= self.mutation_prob:
+            inv_copy[loc1], inv_copy[loc2] = inv_copy[loc2], inv_copy[loc1]
+        return inv_copy
 
-    def _cal_population_distance(self):
-    
+    def crossover(self, parent1, parent2, start, end):
+        parent1 = parent1.copy()
+        parent2 = parent2.copy()
+
+        p1_gene = parent1[start:end]
+        p2_gene = parent2[start:end]
+
+        offspring1 = parent1[~np.in1d(parent1, p2_gene)]
+        offspring2 = parent2[~np.in1d(parent2, p1_gene)]
+
+        for loc in range(start, end):
+            offspring1 = np.insert(offspring1, loc, p2_gene[0])
+            offspring2 = np.insert(offspring2, loc, p1_gene[0])
+
+            p1_gene = np.delete(p1_gene, 0)
+            p2_gene = np.delete(p2_gene, 0)
+
+        return offspring1, offspring2
+
+    def _init_population(self):
+        population = []
+        for i in range(self.population_size):
+            population.append(np.random.choice(self.gene_arr, self.gene_length, replace=False))
+        return np.array(population)
+
+    def _compute_distance(self):
         population_distance = []
-
-        for invidual in self.pop:
-            population_distance.append(calculate_distance(self.distance_df, invidual))
-
+        for individual in self.population:
+            population_distance.append(calculate_distance(self.distances, individual))
         return np.array(population_distance)
 
-    def _tournament_selection(self, tour_size):
-        tournament_candidate_fitness = []
-        for i in range(tour_size):
-            tournament_candidate_fitness.append(np.random.choice(self.pop_fitness))
-        tournament_fittest = np.max(tournament_candidate_fitness)
+    def _tournament_selection(self):
+        tour_candidates = np.random.choice(self.fitness, self.tournament_size, replace=True)
+        tour_winner = np.max(tour_candidates)
+        tour_winner_finess_ind = np.where(self.fitness == tour_winner)[0][0]
 
-        tournament_fittest_inv = self.pop[np.where(self.pop_fitness == tournament_fittest)[0][0]]
-        return tournament_fittest_inv
-    
-    def _cross_over(self, parent1, parent2, start, end):
-        p1_gene = parent1[start:end]
-        # select gene that not in parent1
-        p2_gene = parent2[~np.in1d(parent2, p1_gene)]
-
-        offspring = p2_gene
-        for i in range(start, end):
-            offspring = np.insert(offspring, i, p1_gene[0])
-            p1_gene = np.delete(p1_gene, 0)
-
-        return offspring
-
-    def _mutation(self, offspring, loc1, loc2):
-        offspring[loc1], offspring[loc2] = offspring[loc2], offspring[loc1]
-        return offspring
+        fittest_inv = self.population[tour_winner_finess_ind]
+        return fittest_inv
